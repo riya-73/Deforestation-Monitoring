@@ -96,3 +96,29 @@ Choose the probability threshold using validation data, then evaluate once on th
 ## Planned extensions
 
 The next portfolio milestones are cloud-masked Sentinel-2 composites for two dates, aligned forest labels, multi-date change detection with false-positive filtering, polygon/area summaries, and an interactive map. Those features are not yet implemented in this repository.
+
+## Training curves
+
+A successful training run also writes `outputs/training_history.csv` and `outputs/training_curves.png`. The figure plots train/validation BCE+Dice loss and validation IoU, F1, precision, and recall per epoch. Curves are generated from actual training/validation batches, not example or synthetic values. No curve image is committed until the project has run with real, aligned labels.
+
+## Interactive multi-date change map
+
+Once you have two **aligned, georeferenced binary forest masks** (or probability rasters in `[0,1]`) on the same grid, run:
+
+```bash
+python -m forest_watch.change_map \
+  --date1 data/processed/forest_2022.tif \
+  --date2 data/processed/forest_2024.tif \
+  --date1-name 2022 --date2-name 2024 \
+  --out outputs/interactive_change_map.html
+```
+
+The output is a standalone Folium HTML map with toggleable forest layers for both dates, a red newly-cleared overlay, and polygon popups/tooltips with area in hectares. It also writes a GeoJSON of filtered polygons. The script requires matching CRS/transform/shape and defines candidate clearing as forest at date 1 and non-forest at date 2; cloud masking and seasonal/date comparability must be addressed upstream. This map generator has not been run on the supplied array because the array has no georeferencing and there are no verified date masks. The synthetic-looking map preview is intentionally not included.
+
+## Resume bullets (accurate before benchmark results)
+
+- Designed a geospatial forest-segmentation workflow that validates raster alignment, tiles imagery into labeled patches, and uses geographic block splits to reduce spatial leakage in model evaluation.
+- Implemented a multi-spectral U-Net with an ImageNet-pretrained ResNet-34 encoder, combined BCE–Dice objective, and training-only geometric augmentation for binary forest-cover mapping.
+- Built reproducible model-evaluation and mapping outputs: epoch-level loss/IoU/F1 curves plus a Folium change-map workflow that polygonizes newly cleared areas and reports hectare estimates from georeferenced masks.
+
+After the first successful run, replace generic wording with verified study area, dataset, test metrics, and detected area. Do not claim measured impact before those results exist.
