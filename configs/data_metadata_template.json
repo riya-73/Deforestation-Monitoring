@@ -1,0 +1,14 @@
+{
+  "source": "REPLACE_WITH_SOURCE_OR_EXPORT_ID",
+  "array_or_raster": "stacked_8ch.npy",
+  "shape": [8, 2216, 2199],
+  "layout": "channels_first",
+  "bands_in_exact_order": ["UNKNOWN"],
+  "dates_in_channel_order": ["UNKNOWN"],
+  "reflectance_scale": "VERIFY",
+  "crs": "UNKNOWN - recover from source metadata",
+  "affine_transform": "UNKNOWN - recover from source metadata",
+  "pixel_size_m": "UNKNOWN",
+  "bounds": "UNKNOWN",
+  "nodata": "UNKNOWN"
+}

@@ -1,0 +1,15 @@
+# Set these to your aligned, georeferenced rasters.
+image: data/raw/imagery/image_stack.tif
+label: data/raw/labels/forest_mask.tif
+patch_dir: data/processed/patches
+output_dir: outputs
+patch_size: 256
+# no_data value in binary label raster; valid labels must be 0 or 1.
+label_nodata: 255
+# Set to the number of image bands after inspecting the source.
+in_channels: 8
+seed: 17
+epochs: 30
+batch_size: 8
+learning_rate: 0.0003
+num_workers: 2
