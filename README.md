@@ -1,10 +1,39 @@
-# Forest Watch: Sentinel-2 forest segmentation starter
+# Deforestation Monitoring with Sentinel-2
 
-A runnable scaffold for steps 4–6 of a forest monitoring portfolio project: aligned raster patching, spatially grouped train/validation/test split, U-Net training with BCE + Dice, and test metrics/overlay.
+A portfolio project scaffold for mapping forest cover from Sentinel-2 imagery with a U-Net segmentation model. The current implementation covers geospatial patch preparation, geographically grouped data splits, training, and held-out evaluation. It is designed to grow into a multi-date deforestation change-detection and interactive mapping pipeline.
 
-## Important input limitation
+## What the project does
 
-The provided `stacked_8ch.npy` is channels-first with shape `(8, 2216, 2199)`, but NumPy arrays do not retain CRS, affine transform, band names, or dates. The preparation pipeline deliberately requires georeferenced GeoTIFFs for image and label and refuses to guess this metadata. Recover source metadata first, then export/rebuild a GeoTIFF stack on a known grid. Do not invent an affine transform. Configure band order and label definition in your own metadata and README.
+Given a multi-band, georeferenced image stack and an aligned binary forest mask, the pipeline:
+
+1. Checks that imagery and labels share the same CRS, affine transform, and dimensions.
+2. Divides the rasters into 256 × 256-pixel patches and omits patches with too many unknown labels.
+3. Assigns whole geographic blocks—not individual patches—to train, validation, and test sets to reduce spatial leakage.
+4. Trains a binary U-Net with an ImageNet-pretrained ResNet-34 encoder, BCE + soft Dice loss, and geometric training augmentation.
+5. Evaluates predictions on held-out test blocks and reports precision, recall, F1, and intersection-over-union (IoU).
+6. Saves a sample visualization comparing input channels, ground truth, and predicted forest mask.
+
+### Results produced by a run
+
+After running the commands below, the main artifacts are:
+
+- `data/processed/patches/splits.json` — geographic train/validation/test patch assignment.
+- `outputs/best_model.pt` — model checkpoint with the best validation loss.
+- `outputs/evaluation/metrics.json` — test-set precision, recall, F1, IoU, threshold, and confusion counts.
+- `outputs/evaluation/test_overlay.png` — example input, ground-truth mask, and prediction.
+
+**No model metrics or prediction screenshots are included yet.** Training and evaluation have not been run on a verified, georeferenced imagery/label pair, so there are no measured performance results to report. The output paths above describe what a successful run will create; they are not claims about achieved accuracy.
+
+## Data status and limitations
+
+The supplied `stacked_8ch.npy` is a channels-first `float32` array of shape `(8, 2216, 2199)`. A plain NumPy array does not store CRS, affine transform, band names, or acquisition dates. Its channels and map footprint must be verified from source metadata before it can be used in this geospatial pipeline. Do not invent georeferencing or assume the band/date order from array values alone.
+
+The current scripts expect:
+
+- `data/raw/imagery/image_stack.tif` — a multi-band GeoTIFF, band-first, with CRS and transform. Input values are expected to be reflectance in approximately `[0, 1]`.
+- `data/raw/labels/forest_mask.tif` — a one-band raster on the exact same grid, with `1 = forest`, `0 = non-forest`, and `255 = unknown/nodata`.
+
+Use nearest-neighbor resampling for categorical labels and preserve unknown pixels as nodata. Raw imagery and generated outputs are excluded from Git.
 
 ## Setup
 
@@ -15,48 +44,55 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
-For CUDA, install the PyTorch build matching your machine from https://pytorch.org/get-started/locally/ before `pip install -e .`.
+For CUDA training, install the PyTorch build matching your system from [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/) before installing the project dependencies.
 
-## Inputs
-
-- `data/raw/imagery/image_stack.tif`: multi-band image, band-first, reflectance scaled to 0–1, with CRS/transform.
-- `data/raw/labels/forest_mask.tif`: one-band categorical raster aligned to the same grid, values 1=forest, 0=non-forest, 255=unknown/nodata.
-
-See `configs/rondonia.yaml` for project settings. Use nearest-neighbor to align categorical labels. Never convert unknown/nodata into non-forest.
-
-## Prepare patches and geographic split
+## Prepare patches and spatial splits
 
 ```bash
 python -m forest_watch.prepare \
   --image data/raw/imagery/image_stack.tif \
   --label data/raw/labels/forest_mask.tif \
-  --out data/processed/patches --patch-size 256 --seed 17
+  --out data/processed/patches \
+  --patch-size 256 \
+  --seed 17
 ```
 
-Patches are grouped into contiguous geographic blocks (4×4 patch neighborhoods) and whole blocks are assigned to train/validation/test, reducing spatial leakage. Inspect `splits.json` and verify no geographic block appears in multiple splits. Small datasets may not have enough blocks for robust geographic separation; collect a larger AOI rather than falling back to random patch splits.
+Patches are grouped in contiguous 4 × 4 patch neighborhoods, and whole blocks are assigned to splits. This reduces leakage compared with random patch splits, although adjacent blocks can still be spatially correlated. Inspect the split manifest and use a sufficiently large study area for a meaningful held-out test.
 
-## Train U-Net
+## Train
 
 ```bash
 python -m forest_watch.train \
-  --patch-dir data/processed/patches --in-channels 8 \
-  --epochs 30 --batch-size 8 --lr 0.0003 \
+  --patch-dir data/processed/patches \
+  --in-channels 8 \
+  --epochs 30 \
+  --batch-size 8 \
+  --lr 0.0003 \
   --out outputs/best_model.pt
 ```
 
-The encoder is ImageNet-pretrained ResNet-34. Binary logits are optimized with equal-weight BCE and soft Dice loss. Geometric flips and 90-degree rotations are applied to training patches only. Ensure all bands are reflectance-like in [0,1]; update normalization consistently if your source differs. For pretrained encoders, consider experimenting with a 3-band pretrained encoder plus extra spectral input channels, but evaluate on held-out geographic blocks.
+The encoder is pretrained ResNet-34. The model returns one logit per pixel; equal-weight binary cross-entropy and soft Dice loss are combined for optimization. Horizontal/vertical flips and 90-degree rotations apply only to training patches. Confirm the number and order of input channels and their reflectance scaling before training.
 
 ## Evaluate
 
 ```bash
 python -m forest_watch.evaluate \
   --patch-dir data/processed/patches \
-  --checkpoint outputs/best_model.pt --threshold 0.5 \
+  --checkpoint outputs/best_model.pt \
+  --threshold 0.5 \
   --out outputs/evaluation
 ```
 
-Writes test-set precision, recall, F1, IoU and confusion counts to `metrics.json`, plus a sample input/label/prediction image to `test_overlay.png`. Tune the probability threshold on validation blocks only; report final scores once on the untouched test blocks. The first-three-channel preview is not true RGB unless its band order is known.
+Choose the probability threshold using validation data, then evaluate once on the held-out test split. The overlay displays the first three input channels; it is a true-color image only if those channels are confirmed to be RGB in that order.
 
-## Repository hygiene
+## Configuration and code
 
-Raw imagery and generated patches are excluded from Git by `.gitignore`. Add small result figures and documented methods if publishing the project. Record dataset citations, dates, band order, reflectance scaling, CRS, spatial split strategy, model settings, and known limitations.
+- `configs/rondonia.yaml` — example paths and hyperparameters.
+- `configs/data_metadata_template.json` — metadata checklist for the supplied NumPy array.
+- `src/forest_watch/prepare.py` — patch extraction and block-level split.
+- `src/forest_watch/train.py` — dataset loader, augmentation, U-Net, loss, and training loop.
+- `src/forest_watch/evaluate.py` — test metrics and prediction overlay.
+
+## Planned extensions
+
+The next portfolio milestones are cloud-masked Sentinel-2 composites for two dates, aligned forest labels, multi-date change detection with false-positive filtering, polygon/area summaries, and an interactive map. Those features are not yet implemented in this repository.
